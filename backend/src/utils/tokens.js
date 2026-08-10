@@ -36,7 +36,7 @@ function cookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 1000 * 60 * 60 * 24, // cookie lifespan ceiling; actual auth validity is bounded by the JWT's own expiry
     path: '/',
   };
