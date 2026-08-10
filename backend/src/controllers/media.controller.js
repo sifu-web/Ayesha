@@ -3,7 +3,30 @@ const db = require('../config/db');
 const { cloudinary, FOLDER } = require('../config/cloudinary');
 const { logAction } = require('../utils/audit');
 
-/** Uploads a single in-memory buffer to Cloudinary, returning its result. */
+// "HD" transformation applied to images at upload time, and to videos
+// on-the-fly at delivery time (see videoHdUrl below).
+const IMAGE_HD_EAGER = { quality: 'auto:good', fetch_format: 'auto', crop: 'limit', width: 2560, height: 2560 };
+const VIDEO_HD_TRANSFORM = { quality: 'auto:good', fetch_format: 'auto', video_codec: 'auto' };
+
+/** Builds the on-the-fly "HD" delivery URL for a video, without transcoding at upload time. */
+function videoHdUrl(publicId) {
+  return cloudinary.url(publicId, { resource_type: 'video', secure: true, ...VIDEO_HD_TRANSFORM });
+}
+
+/**
+ * Uploads a single in-memory buffer to Cloudinary, returning its result.
+ *
+ * Videos go through the chunked upload API (6MB chunks) instead of the plain
+ * upload API. The plain API caps a single request around 100MB on most
+ * Cloudinary plans, which silently rejected many phone videos. Chunking also
+ * means a flaky mobile connection doesn't have to resend the whole file.
+ *
+ * Videos are also never transcoded synchronously at upload time
+ * (no eager/eager_async here) — that used to block the request for minutes
+ * per video, which is what made uploads hang and phones heat up. The "HD"
+ * version of a video is instead served via an on-the-fly transformation URL
+ * (videoHdUrl), which Cloudinary generates on first request and caches.
+ */
 function uploadBufferToCloudinary(buffer, { resourceType, quality }) {
   return new Promise((resolve, reject) => {
     const options = {
@@ -14,23 +37,30 @@ function uploadBufferToCloudinary(buffer, { resourceType, quality }) {
       overwrite: false,
     };
 
-    if (quality === 'hd') {
-      // "HD" = compress while preserving good visual quality.
-      options.eager = [
-        resourceType === 'video'
-          ? { quality: 'auto:good', fetch_format: 'auto', video_codec: 'auto' }
-          : { quality: 'auto:good', fetch_format: 'auto', crop: 'limit', width: 2560, height: 2560 },
-      ];
+    if (quality === 'hd' && resourceType === 'image') {
+      // Images are small/fast enough to transcode synchronously at upload time.
+      options.eager = [IMAGE_HD_EAGER];
       options.eager_async = false;
     }
     // quality === 'original' → no transformation, file stored as-is.
+    // resourceType === 'video' → never transcoded at upload time (see videoHdUrl).
 
-    const stream = cloudinary.uploader.upload_stream(options, (err, result) => {
+    const done = (err, result) => {
       if (err) return reject(err);
       resolve(result);
-    });
+    };
 
-    streamifier.createReadStream(buffer).pipe(stream);
+    if (resourceType === 'video') {
+      // Chunked upload: streams the buffer in ~6MB pieces, no single-request size cap.
+      const uploadStream = cloudinary.uploader.upload_chunked_stream(
+        { ...options, chunk_size: 6 * 1024 * 1024 },
+        done
+      );
+      streamifier.createReadStream(buffer).pipe(uploadStream);
+    } else {
+      const uploadStream = cloudinary.uploader.upload_stream(options, done);
+      streamifier.createReadStream(buffer).pipe(uploadStream);
+    }
   });
 }
 
@@ -63,7 +93,12 @@ async function uploadMedia(req, res) {
       const uploaded = await uploadBufferToCloudinary(file.buffer, { resourceType, quality });
 
       const eager = uploaded.eager && uploaded.eager[0];
-      const finalUrl = eager ? eager.secure_url : uploaded.secure_url;
+      const finalUrl =
+        quality === 'hd' && resourceType === 'video'
+          ? videoHdUrl(uploaded.public_id)
+          : eager
+          ? eager.secure_url
+          : uploaded.secure_url;
       const thumbnail =
         resourceType === 'video'
           ? cloudinary.url(uploaded.public_id, {

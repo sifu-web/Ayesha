@@ -52,7 +52,7 @@ ayesha-app/
 
 | Username | Password |
 |----------|----------|
-| `Ayesha` | `143`    |
+| `Ayesha` | `mangomango` |
 
 This account is created automatically the first time the backend starts (seeded
 into SQLite). **Change the password immediately** from Settings after your first
