@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ink text-pearl font-body antialiased;
+    position: relative;
+    min-height: 100vh;
+  }
+  /* Ambient glow as a fixed, independently-composited layer instead of
+     background-attachment:fixed — same visual result, but avoids the
+     expensive main-thread repaint that fixed backgrounds trigger on every
+     scroll frame (especially on mobile). */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: theme('backgroundImage.ambient-glow');
+    transform: translateZ(0);
+  }
+  ::selection {
+    @apply bg-rose/30 text-pearl;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+  }
+  :focus-visible {
+    outline: 2px solid #ff4d7d;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.09] shadow-glass;
+  }
+  .glass-panel {
+    @apply glass rounded-3xl;
+  }
+  /* Used for floating menus (e.g. the profile dropdown) that sit directly on
+     top of page text. A much more opaque backing + heavier blur than
+     .glass-panel so nothing behind it is readable. */
+  .glass-panel-solid {
+    @apply rounded-3xl border border-white/[0.09] shadow-glass;
+    background-color: rgba(10, 11, 16, 0.92);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+  }
+  .glass-input {
+    @apply w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3
+      text-pearl placeholder:text-mist/70 outline-none transition
+      focus:border-rose/60 focus:bg-white/[0.07];
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold
+      bg-rose-orchid text-white shadow-glow transition-transform duration-200
+      hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold
+      glass text-pearl transition hover:bg-white/[0.08] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold
+      bg-coral/15 text-coral border border-coral/30 transition hover:bg-coral/25;
+  }
+  .chip {
+    @apply px-3 py-1.5 rounded-full text-sm font-medium transition cursor-pointer select-none;
+  }
+  .gpu-layer {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%);
+    background-size: 400px 100%;
+    @apply animate-shimmer rounded-2xl;
+  }
+}
