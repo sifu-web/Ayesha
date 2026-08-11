@@ -45,6 +45,30 @@ export default function Navbar() {
 
               {isAdmin && (
                 <button
+                  onClick={() => { setOpen(false); navigate('/diary'); }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-pearl transition hover:bg-white/[0.07]"
+                >
+                  📔 Diary
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => { setOpen(false); navigate('/songs'); }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-pearl transition hover:bg-white/[0.07]"
+                >
+                  🎵 Songs
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => { setOpen(false); navigate('/documents'); }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-pearl transition hover:bg-white/[0.07]"
+                >
+                  📁 Documents
+                </button>
+              )}
+              {isAdmin && (
+                <button
                   onClick={() => { setOpen(false); navigate('/dashboard'); }}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-pearl transition hover:bg-white/[0.07]"
                 >

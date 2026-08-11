@@ -11,7 +11,7 @@ router.post(
   '/login',
   authLimiter,
   [
-    body('username').trim().notEmpty().withMessage('Username is required.').escape(),
+    body('username').trim().notEmpty().withMessage('Username is required.'),
     body('password').notEmpty().withMessage('Password is required.'),
   ],
   validate,

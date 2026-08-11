@@ -19,6 +19,9 @@ const mediaRoutes = require('./routes/media.routes');
 const statsRoutes = require('./routes/stats.routes');
 const auditRoutes = require('./routes/audit.routes');
 const keysRoutes = require('./routes/keys.routes');
+const diaryRoutes = require('./routes/diary.routes');
+const songsRoutes = require('./routes/songs.routes');
+const documentsRoutes = require('./routes/documents.routes');
 
 const app = express();
 
@@ -58,6 +61,9 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/keys', keysRoutes);
+app.use('/api/diary', diaryRoutes);
+app.use('/api/songs', songsRoutes);
+app.use('/api/documents', documentsRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

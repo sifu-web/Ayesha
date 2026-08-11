@@ -13,7 +13,7 @@ router.get('/', listUsers);
 router.post(
   '/',
   [
-    body('username').trim().isLength({ min: 3, max: 30 }).withMessage('Username must be 3-30 characters.').escape(),
+    body('username').trim().isLength({ min: 3, max: 30 }).withMessage('Username must be 3-30 characters.'),
     body('password').isLength({ min: 4 }).withMessage('Password must be at least 4 characters.'),
     body('role').isIn(['admin', 'user']).withMessage('Role must be admin or user.'),
   ],
@@ -24,7 +24,7 @@ router.post(
 router.put(
   '/:id',
   [
-    body('username').optional().trim().isLength({ min: 3, max: 30 }).escape(),
+    body('username').optional().trim().isLength({ min: 3, max: 30 }),
     body('password').optional({ checkFalsy: true }).isLength({ min: 4 }),
     body('role').optional().isIn(['admin', 'user']),
   ],

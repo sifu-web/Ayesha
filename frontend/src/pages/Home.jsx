@@ -7,7 +7,7 @@ import api from '../api/axios';
 
 export default function Home() {
   const { isAdmin } = useAuth();
-  const [counts, setCounts] = useState({ photo: null, video: null });
+  const [counts, setCounts] = useState({ photo: null, video: null, diary: null, songs: null, documents: null });
   const [uploadOpen, setUploadOpen] = useState(false);
 
   async function fetchCounts() {
@@ -16,9 +16,32 @@ export default function Home() {
         api.get('/media', { params: { type: 'photo', limit: 1 } }),
         api.get('/media', { params: { type: 'video', limit: 1 } }),
       ]);
-      setCounts({ photo: photos.data.pagination.total, video: videos.data.pagination.total });
+      setCounts((prev) => ({ ...prev, photo: photos.data.pagination.total, video: videos.data.pagination.total }));
     } catch {
-      setCounts({ photo: 0, video: 0 });
+      setCounts((prev) => ({ ...prev, photo: 0, video: 0 }));
+    }
+
+    if (isAdmin) {
+      try {
+        const diary = await api.get('/diary', { params: { limit: 1 } });
+        setCounts((prev) => ({ ...prev, diary: diary.data.pagination.total }));
+      } catch {
+        setCounts((prev) => ({ ...prev, diary: 0 }));
+      }
+
+      try {
+        const songs = await api.get('/songs');
+        setCounts((prev) => ({ ...prev, songs: songs.data.items.length }));
+      } catch {
+        setCounts((prev) => ({ ...prev, songs: 0 }));
+      }
+
+      try {
+        const documents = await api.get('/documents');
+        setCounts((prev) => ({ ...prev, documents: documents.data.items.length }));
+      } catch {
+        setCounts((prev) => ({ ...prev, documents: 0 }));
+      }
     }
   }
 
@@ -51,6 +74,36 @@ export default function Home() {
             count={counts.video}
             gradient="from-orchid/20 to-transparent"
           />
+          {isAdmin && (
+            <HomeCard
+              to="/diary"
+              emoji="📔"
+              title="Diary"
+              count={counts.diary}
+              countLabel="entry"
+              gradient="from-mint/20 to-transparent"
+            />
+          )}
+          {isAdmin && (
+            <HomeCard
+              to="/songs"
+              emoji="🎵"
+              title="Songs"
+              count={counts.songs}
+              countLabel="track"
+              gradient="from-sky/20 to-transparent"
+            />
+          )}
+          {isAdmin && (
+            <HomeCard
+              to="/documents"
+              emoji="📁"
+              title="Documents"
+              count={counts.documents}
+              countLabel="file"
+              gradient="from-amber/20 to-transparent"
+            />
+          )}
         </div>
       </main>
 
@@ -67,8 +120,10 @@ export default function Home() {
       {uploadOpen && (
         <UploadModal
           onClose={() => setUploadOpen(false)}
-          onUploaded={() => {
-            setUploadOpen(false);
+          onUploaded={(failedCount) => {
+            // Only auto-close on a full success — if anything failed, keep
+            // the modal open so the person can actually see the error.
+            if (!failedCount) setUploadOpen(false);
             fetchCounts();
           }}
         />
@@ -77,18 +132,21 @@ export default function Home() {
   );
 }
 
-function HomeCard({ to, emoji, title, count, gradient }) {
+function HomeCard({ to, emoji, title, count, gradient, countLabel = 'file', className = '' }) {
+  const plural = countLabel === 'entry' ? 'entries' : `${countLabel}s`;
+  const label = count === 1 ? countLabel : plural;
+
   return (
     <Link
       to={to}
-      className={`glass-panel animate-fade-up group relative overflow-hidden p-10 transition duration-300 hover:-translate-y-1 hover:shadow-glow sm:p-14`}
+      className={`glass-panel animate-fade-up group relative overflow-hidden p-10 transition duration-300 hover:-translate-y-1 hover:shadow-glow sm:p-14 ${className}`}
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 transition group-hover:opacity-100`} />
       <div className="relative flex flex-col items-center text-center">
         <span className="text-6xl transition group-hover:scale-110">{emoji}</span>
         <h2 className="mt-5 font-display italic text-3xl text-pearl">{title}</h2>
         <p className="mt-2 font-mono text-sm text-mist">
-          {count === null ? 'Loading…' : `${count.toLocaleString()} file${count === 1 ? '' : 's'}`}
+          {count === null ? 'Loading…' : `${count.toLocaleString()} ${label}`}
         </p>
       </div>
     </Link>

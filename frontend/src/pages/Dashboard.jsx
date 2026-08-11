@@ -101,8 +101,10 @@ export default function Dashboard() {
       {uploadOpen && (
         <UploadModal
           onClose={() => setUploadOpen(false)}
-          onUploaded={() => {
-            setUploadOpen(false);
+          onUploaded={(failedCount) => {
+            // Only auto-close on a full success — if anything failed, keep
+            // the modal open so the person can actually see the error.
+            if (!failedCount) setUploadOpen(false);
             fetchStats();
           }}
         />

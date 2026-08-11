@@ -1,153 +1,148 @@
-const streamifier = require('streamifier');
 const db = require('../config/db');
 const { cloudinary, FOLDER } = require('../config/cloudinary');
 const { logAction } = require('../utils/audit');
 
-// "HD" transformation applied to images at upload time, and to videos
-// on-the-fly at delivery time (see videoHdUrl below).
-const IMAGE_HD_EAGER = { quality: 'auto:good', fetch_format: 'auto', crop: 'limit', width: 2560, height: 2560 };
-const VIDEO_HD_TRANSFORM = { quality: 'auto:good', fetch_format: 'auto', video_codec: 'auto' };
-
-/** Builds the on-the-fly "HD" delivery URL for a video, without transcoding at upload time. */
-function videoHdUrl(publicId) {
-  return cloudinary.url(publicId, { resource_type: 'video', secure: true, ...VIDEO_HD_TRANSFORM });
-}
-
 /**
- * Uploads a single in-memory buffer to Cloudinary, returning its result.
+ * Upload flow: Phone → Cloudinary (direct, chunked) → Backend saves only the URL.
  *
- * Videos go through the chunked upload API (6MB chunks) instead of the plain
- * upload API. The plain API caps a single request around 100MB on most
- * Cloudinary plans, which silently rejected many phone videos. Chunking also
- * means a flaky mobile connection doesn't have to resend the whole file.
+ * The browser uploads the raw file straight to Cloudinary using a short-lived
+ * signature issued by getUploadSignature() below; our server never sees the
+ * file bytes. Once Cloudinary has the asset, the frontend calls confirmMedia()
+ * with just the public_id — the backend re-fetches the authoritative asset
+ * info (bytes/dimensions/format/url) directly from Cloudinary's Admin API
+ * rather than trusting numbers the client could tamper with, and writes the
+ * DB row from that.
  *
- * Videos are also never transcoded synchronously at upload time
- * (no eager/eager_async here) — that used to block the request for minutes
- * per video, which is what made uploads hang and phones heat up. The "HD"
- * version of a video is instead served via an on-the-fly transformation URL
- * (videoHdUrl), which Cloudinary generates on first request and caches.
+ * This removes the old phone → our server → Cloudinary relay entirely, so:
+ *  - there's no server-side file size ceiling or in-memory buffering of the
+ *    whole video
+ *  - the phone only transfers the file once (not twice), which was the
+ *    biggest cause of long upload times / the device heating up
+ *  - a slow/interrupted mobile connection can't hang our server's request
+ *    handling — Cloudinary's own chunked upload protocol handles retry of
+ *    individual chunks on the client
  */
-function uploadBufferToCloudinary(buffer, { resourceType, quality }) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      folder: FOLDER,
-      resource_type: resourceType,
-      use_filename: true,
-      unique_filename: true,
-      overwrite: false,
-    };
 
-    if (quality === 'hd' && resourceType === 'image') {
-      // Images are small/fast enough to transcode synchronously at upload time.
-      options.eager = [IMAGE_HD_EAGER];
-      options.eager_async = false;
-    }
-    // quality === 'original' → no transformation, file stored as-is.
-    // resourceType === 'video' → never transcoded at upload time (see videoHdUrl).
+/** Builds the delivery URL for a given quality mode without waiting on any upload-time processing. */
+function buildFinalUrl(resource, resourceType, quality) {
+  if (quality !== 'hd') return resource.secure_url;
 
-    const done = (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
-    };
-
-    if (resourceType === 'video') {
-      // Chunked upload: streams the buffer in ~6MB pieces, no single-request size cap.
-      const uploadStream = cloudinary.uploader.upload_chunked_stream(
-        { ...options, chunk_size: 6 * 1024 * 1024 },
-        done
-      );
-      streamifier.createReadStream(buffer).pipe(uploadStream);
-    } else {
-      const uploadStream = cloudinary.uploader.upload_stream(options, done);
-      streamifier.createReadStream(buffer).pipe(uploadStream);
-    }
+  return cloudinary.url(resource.public_id, {
+    resource_type: resourceType,
+    secure: true,
+    quality: 'auto:good',
+    fetch_format: 'auto',
+    ...(resourceType === 'video'
+      ? { video_codec: 'auto' }
+      : { crop: 'limit', width: 2560, height: 2560 }),
   });
 }
 
-async function uploadMedia(req, res) {
-  const files = req.files;
-  const { quality = 'original' } = req.body;
+function buildThumbnail(publicId, resourceType) {
+  return resourceType === 'video'
+    ? cloudinary.url(publicId, {
+        resource_type: 'video',
+        format: 'jpg',
+        start_offset: '0',
+        width: 500,
+        crop: 'fill',
+      })
+    : cloudinary.url(publicId, { width: 500, crop: 'fill', quality: 'auto', fetch_format: 'auto' });
+}
 
-  if (!files || files.length === 0) {
-    return res.status(400).json({ success: false, message: 'No files were provided.' });
+/**
+ * Issues a short-lived signature the browser uses to upload directly to
+ * Cloudinary. Only `folder` + `timestamp` are signed (and therefore locked
+ * down) — the client cannot smuggle in extra params like a different folder
+ * or upload preset, since Cloudinary rejects any signed param that doesn't
+ * match what was signed here.
+ */
+async function getUploadSignature(req, res) {
+  const timestamp = Math.round(Date.now() / 1000);
+  const paramsToSign = { folder: FOLDER, timestamp };
+  const signature = cloudinary.utils.api_sign_request(paramsToSign, process.env.CLOUDINARY_API_SECRET);
+
+  res.json({
+    success: true,
+    signature,
+    timestamp,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    folder: FOLDER,
+  });
+}
+
+/**
+ * Called by the frontend after a file has already landed on Cloudinary
+ * directly. We re-fetch the asset from Cloudinary ourselves (never trusting
+ * client-supplied bytes/dimensions) and write the DB row from that.
+ */
+async function confirmMedia(req, res) {
+  const { publicId, resourceType, quality = 'original', originalFilename } = req.body;
+
+  if (!publicId || !['image', 'video'].includes(resourceType)) {
+    return res.status(400).json({ success: false, message: 'publicId and a valid resourceType are required.' });
   }
-
   if (!['original', 'hd'].includes(quality)) {
     return res.status(400).json({ success: false, message: 'Quality must be "original" or "hd".' });
   }
 
-  const results = [];
-  const failures = [];
-
-  for (const file of files) {
-    const isVideo = file.mimetype.startsWith('video/');
-    const isImage = file.mimetype.startsWith('image/');
-
-    if (!isVideo && !isImage) {
-      failures.push({ filename: file.originalname, reason: 'Unsupported file type.' });
-      continue;
-    }
-
-    try {
-      const resourceType = isVideo ? 'video' : 'image';
-      const uploaded = await uploadBufferToCloudinary(file.buffer, { resourceType, quality });
-
-      const eager = uploaded.eager && uploaded.eager[0];
-      const finalUrl =
-        quality === 'hd' && resourceType === 'video'
-          ? videoHdUrl(uploaded.public_id)
-          : eager
-          ? eager.secure_url
-          : uploaded.secure_url;
-      const thumbnail =
-        resourceType === 'video'
-          ? cloudinary.url(uploaded.public_id, {
-              resource_type: 'video',
-              format: 'jpg',
-              start_offset: '0',
-              width: 500,
-              crop: 'fill',
-            })
-          : cloudinary.url(uploaded.public_id, { width: 500, crop: 'fill', quality: 'auto', fetch_format: 'auto' });
-
-      const inserted = await db.query(
-        `INSERT INTO media
-          (public_id, resource_type, format, url, secure_url, thumbnail_url, original_filename, quality_mode, bytes, width, height, duration, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         RETURNING *`,
-        [
-          uploaded.public_id,
-          resourceType,
-          uploaded.format,
-          uploaded.url,
-          finalUrl,
-          thumbnail,
-          file.originalname,
-          quality,
-          eager ? eager.bytes : uploaded.bytes,
-          uploaded.width || null,
-          uploaded.height || null,
-          uploaded.duration || null,
-          req.user.id,
-        ]
-      );
-
-      results.push(inserted.rows[0]);
-    } catch (err) {
-      console.error('Cloudinary upload failed:', err.message);
-      failures.push({ filename: file.originalname, reason: 'Upload failed.' });
-    }
+  // A previously confirmed upload (e.g. a retried request) — return the
+  // existing row instead of erroring, so retries are safe.
+  const existing = await db.query('SELECT * FROM media WHERE public_id = $1', [publicId]);
+  if (existing.rows[0]) {
+    return res.status(200).json({ success: true, media: existing.rows[0] });
   }
+
+  let resource;
+  try {
+    resource = await cloudinary.api.resource(publicId, { resource_type: resourceType });
+  } catch (err) {
+    console.error('Cloudinary resource lookup failed:', err.message);
+    return res.status(404).json({ success: false, message: 'Could not verify the uploaded file with Cloudinary.' });
+  }
+
+  // Only accept assets that actually live in our own upload folder.
+  if (!resource.public_id.startsWith(`${FOLDER}/`) && resource.folder !== FOLDER) {
+    return res.status(403).json({ success: false, message: 'That file is not in the expected folder.' });
+  }
+
+  const finalUrl = buildFinalUrl(resource, resourceType, quality);
+  const thumbnail = buildThumbnail(resource.public_id, resourceType);
+
+  const inserted = await db.query(
+    `INSERT INTO media
+      (public_id, resource_type, format, url, secure_url, thumbnail_url, original_filename, quality_mode, bytes, width, height, duration, uploaded_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     RETURNING *`,
+    [
+      resource.public_id,
+      resourceType,
+      resource.format,
+      resource.url,
+      finalUrl,
+      thumbnail,
+      originalFilename || resource.public_id,
+      quality,
+      resource.bytes,
+      resource.width || null,
+      resource.height || null,
+      resource.duration || null,
+      req.user.id,
+    ]
+  );
+
+  const media = inserted.rows[0];
 
   await logAction({
     userId: req.user.id,
     username: req.user.username,
     action: 'MEDIA_UPLOADED',
-    details: `Uploaded ${results.length} file(s) (${quality}), ${failures.length} failed`,
+    details: `Uploaded 1 ${resourceType} (${quality})`,
     ip: req.ip,
   });
 
-  res.status(201).json({ success: true, uploaded: results, failed: failures });
+  res.status(201).json({ success: true, media });
 }
 
 async function listMedia(req, res) {
@@ -253,4 +248,4 @@ async function getDownloadUrl(req, res) {
   res.json({ success: true, downloadUrl, filename: item.original_filename });
 }
 
-module.exports = { uploadMedia, listMedia, deleteMedia, getDownloadUrl };
+module.exports = { getUploadSignature, confirmMedia, listMedia, deleteMedia, getDownloadUrl };

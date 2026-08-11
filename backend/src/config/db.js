@@ -91,6 +91,58 @@ async function initSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
+
+    CREATE TABLE IF NOT EXISTS diary_entries (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      color TEXT NOT NULL DEFAULT '#FF4D7D',
+      text_color TEXT NOT NULL DEFAULT '#FFFFFF',
+      voice_url TEXT,
+      voice_public_id TEXT,
+      voice_duration REAL,
+      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_diary_entry_date ON diary_entries(entry_date);
+    CREATE INDEX IF NOT EXISTS idx_diary_created_at ON diary_entries(created_at);
+
+    CREATE TABLE IF NOT EXISTS songs (
+      id SERIAL PRIMARY KEY,
+      public_id TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL CHECK(kind IN ('song', 'voice')) DEFAULT 'song',
+      display_name TEXT NOT NULL,
+      original_filename TEXT,
+      url TEXT NOT NULL,
+      format TEXT,
+      bytes BIGINT NOT NULL DEFAULT 0,
+      duration REAL,
+      uploaded_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_songs_created_at ON songs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_songs_kind ON songs(kind);
+
+    CREATE TABLE IF NOT EXISTS documents (
+      id SERIAL PRIMARY KEY,
+      public_id TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      original_filename TEXT,
+      url TEXT NOT NULL,
+      format TEXT,
+      bytes BIGINT NOT NULL DEFAULT 0,
+      uploaded_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at);
+    CREATE INDEX IF NOT EXISTS idx_documents_filename ON documents(display_name);
   `);
 
   await seedDefaultAdmin();
@@ -101,7 +153,7 @@ async function seedDefaultAdmin() {
   if (rows.length) return;
 
   const username = process.env.DEFAULT_ADMIN_USERNAME || 'Ayesha';
-  const password = process.env.DEFAULT_ADMIN_PASSWORD || '143';
+  const password = process.env.DEFAULT_ADMIN_PASSWORD || 'mangomango';
   const hash = await bcrypt.hash(password, 12);
 
   await pool.query('INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)', [

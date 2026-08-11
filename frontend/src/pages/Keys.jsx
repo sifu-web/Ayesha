@@ -44,10 +44,23 @@ export default function Keys() {
   const [copiedId, setCopiedId] = useState(null);
   const [tick, setTick] = useState(0);
 
+  // Stamps each key with an absolute expiry timestamp (client clock) the
+  // moment we learn its remaining_seconds, whether from a full list fetch
+  // or a single freshly-generated key. Using an absolute timestamp (instead
+  // of a single shared "last fetched at" reference point) keeps every key's
+  // countdown accurate independently of when it individually entered state.
+  function withClientExpiry(key) {
+    const clientExpiresAt =
+      key.status === 'active' && key.remaining_seconds !== null && key.remaining_seconds !== undefined
+        ? Date.now() + key.remaining_seconds * 1000
+        : null;
+    return { ...key, clientExpiresAt };
+  }
+
   async function fetchKeys() {
     setLoading(true);
     const { data } = await api.get('/keys');
-    setKeys(data.keys);
+    setKeys(data.keys.map(withClientExpiry));
     setLoading(false);
   }
 
@@ -66,7 +79,7 @@ export default function Keys() {
     setError('');
     try {
       const { data } = await api.post('/keys', { durationType: duration });
-      setKeys((prev) => [data.key, ...prev]);
+      setKeys((prev) => [withClientExpiry(data.key), ...prev]);
     } catch (err) {
       setError(err.response?.data?.message || 'Could not generate a key.');
     } finally {
@@ -98,7 +111,8 @@ export default function Keys() {
   function liveRemaining(key) {
     if (key.status !== 'active' || key.remaining_seconds === null) return key.remaining_seconds;
     void tick; // re-render trigger
-    return key.remaining_seconds;
+    if (key.clientExpiresAt === null || key.clientExpiresAt === undefined) return key.remaining_seconds;
+    return Math.max(0, Math.round((key.clientExpiresAt - Date.now()) / 1000));
   }
 
   return (

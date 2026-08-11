@@ -17,6 +17,7 @@ export default {
         mist: '#8B8D9B',
         mint: '#4ADE80',
         coral: '#FB7185',
+        sky: '#38BDF8',
       },
       fontFamily: {
         display: ['"Fraunces"', 'serif'],
