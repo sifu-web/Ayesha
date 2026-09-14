@@ -166,4 +166,22 @@ async function deleteSong(req, res) {
   res.json({ success: true, message: 'Deleted successfully.' });
 }
 
-module.exports = { getUploadSignature, confirmSong, listSongs, renameSong, deleteSong };
+async function getDownloadUrl(req, res) {
+  const { id } = req.params;
+  const result = await db.query('SELECT * FROM songs WHERE id = $1', [id]);
+  const item = result.rows[0];
+
+  if (!item) {
+    return res.status(404).json({ success: false, message: 'File not found.' });
+  }
+
+  const downloadUrl = cloudinary.url(item.public_id, {
+    resource_type: 'video',
+    flags: 'attachment',
+    secure: true,
+  });
+
+  res.json({ success: true, downloadUrl, filename: item.original_filename || item.display_name });
+}
+
+module.exports = { getUploadSignature, confirmSong, listSongs, renameSong, deleteSong, getDownloadUrl };

@@ -5,6 +5,7 @@ const {
   listSongs,
   renameSong,
   deleteSong,
+  getDownloadUrl,
 } = require('../controllers/songs.controller');
 const { verifyToken, requireAdmin } = require('../middleware/auth');
 const { uploadLimiter } = require('../middleware/rateLimiter');
@@ -16,6 +17,7 @@ router.use(verifyToken);
 router.use(requireAdmin);
 
 router.get('/', listSongs);
+router.get('/:id/download', getDownloadUrl);
 router.post('/upload-signature', uploadLimiter, getUploadSignature);
 router.post('/confirm', uploadLimiter, confirmSong);
 router.put('/:id', renameSong);

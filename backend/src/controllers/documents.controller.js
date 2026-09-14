@@ -170,9 +170,16 @@ async function getDownloadUrl(req, res) {
     return res.status(404).json({ success: false, message: 'File not found.' });
   }
 
+  // Raw assets (PDF/Word/zip/etc.) are delivered by Cloudinary under a
+  // stricter access policy than images/videos — an unsigned raw URL comes
+  // back as an HTTP 401 even though the asset is "public" in our own app.
+  // Signing the URL (sign_url: true) attaches an expiring signature so
+  // Cloudinary authorizes the delivery regardless of that stricter default.
   const downloadUrl = cloudinary.url(item.public_id, {
     resource_type: 'raw',
+    type: 'upload',
     flags: 'attachment',
+    sign_url: true,
     secure: true,
   });
 
